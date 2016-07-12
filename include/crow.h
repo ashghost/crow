@@ -9,7 +9,7 @@
 #include <thread>
 
 #include "settings.h"
-#include "logging.h" 
+#include "logging.h"
 #include "utility.h"
 #include "routing.h"
 #include "middleware_context.h"
@@ -89,14 +89,30 @@ namespace crow
             if (use_ssl_)
             {
                 ssl_server_t server(this, port_, &middlewares_, concurrency_, &ssl_context_);
+                ssl_server_ = &server;
                 server.run();
             }
             else
 #endif
             {
                 server_t server(this, port_, &middlewares_, concurrency_, nullptr);
+                server_ = &server;
                 server.run();
             }
+        }
+
+        void stop()
+        {
+            if (server_)
+            {
+                server_->stop();
+            }
+#ifdef CROW_ENABLE_SSL
+            else if (ssl_server_)
+            {
+                ssl_server_->stop();
+            }
+#endif
         }
 
         void debug_print()
@@ -151,7 +167,7 @@ namespace crow
             // We can't call .ssl() member function unless CROW_ENABLE_SSL is defined.
             static_assert(
                     // make static_assert dependent to T; always false
-                    std::is_base_of<T, void>::value, 
+                    std::is_base_of<T, void>::value,
                     "Define CROW_ENABLE_SSL to enable ssl support.");
             return *this;
         }
@@ -162,7 +178,7 @@ namespace crow
             // We can't call .ssl() member function unless CROW_ENABLE_SSL is defined.
             static_assert(
                     // make static_assert dependent to T; always false
-                    std::is_base_of<T, void>::value, 
+                    std::is_base_of<T, void>::value,
                     "Define CROW_ENABLE_SSL to enable ssl support.");
             return *this;
         }
@@ -188,6 +204,10 @@ namespace crow
         uint16_t port_ = 80;
         uint16_t concurrency_ = 1;
 
+#ifdef CROW_ENABLE_SSL
+        ssl_server_t* ssl_server_;
+#endif
+        server_t* server_;
         Router router_;
 
         std::tuple<Middlewares...> middlewares_;

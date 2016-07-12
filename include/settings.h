@@ -3,10 +3,10 @@
 // TODO - replace with runtime config. libucl?
 
 /* #ifdef - enables debug mode */
-#define CROW_ENABLE_DEBUG
+ //#define CROW_ENABLE_DEBUG
 
 /* #ifdef - enables logging */
-#define CROW_ENABLE_LOGGING
+ //#define CROW_ENABLE_LOGGING
 
 /* #ifdef - enables SSL */
 //#define CROW_ENABLE_SSL
@@ -21,7 +21,7 @@
 
     default to INFO
 */
-#define CROW_LOG_LEVEL 1
+#define CROW_LOG_LEVEL 0
 
 
 // compiler flags

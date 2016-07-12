@@ -1,6 +1,5 @@
 #pragma once
 
-#include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/asio.hpp>
 #ifdef CROW_ENABLE_SSL
 #include <boost/asio/ssl.hpp>
@@ -20,15 +19,15 @@ namespace crow
 {
     using namespace boost;
     using tcp = asio::ip::tcp;
-    
+
     template <typename Handler, typename Adaptor = SocketAdaptor, typename ... Middlewares>
     class Server
     {
     public:
         Server(Handler* handler, uint16_t port, std::tuple<Middlewares...>* middlewares = nullptr, uint16_t concurrency = 1, typename Adaptor::context* adaptor_ctx = nullptr)
-            : acceptor_(io_service_, tcp::endpoint(asio::ip::address(), port)), 
-            signals_(io_service_, SIGINT, SIGTERM),
-            handler_(handler), 
+            : acceptor_(io_service_, tcp::endpoint(asio::ip::address(), port)),
+            // signals_(io_service_, SIGINT, SIGTERM),
+            handler_(handler),
             concurrency_(concurrency),
             port_(port),
             middlewares_(middlewares),
@@ -85,15 +84,15 @@ namespace crow
                             timer_queue_pool_[i] = &timer_queue;
 
                             timer_queue.set_io_service(*io_service_pool_[i]);
-                            boost::asio::deadline_timer timer(*io_service_pool_[i]);
-                            timer.expires_from_now(boost::posix_time::seconds(1));
+                            boost::asio::steady_timer timer(*io_service_pool_[i]);
+                            timer.expires_from_now(std::chrono::seconds(1));
 
                             std::function<void(const boost::system::error_code& ec)> handler;
                             handler = [&](const boost::system::error_code& ec){
                                 if (ec)
                                     return;
                                 timer_queue.process();
-                                timer.expires_from_now(boost::posix_time::seconds(1));
+                                timer.expires_from_now(std::chrono::seconds(1));
                                 timer.async_wait(handler);
                             };
                             timer.async_wait(handler);
@@ -102,10 +101,10 @@ namespace crow
                         }));
             CROW_LOG_INFO << server_name_ << " server is running, local port " << port_;
 
-            signals_.async_wait(
-                [&](const boost::system::error_code& error, int signal_number){
-                    stop();
-                });
+            // signals_.async_wait(
+            //     [&](const boost::system::error_code& error, int signal_number){
+            //         stop();
+            //     });
 
             for (int i = 0; i < concurrency_; i++)
             {
@@ -145,7 +144,7 @@ namespace crow
                 is, handler_, server_name_, middlewares_,
                 get_cached_date_str_pool_[roundrobin_index_], *timer_queue_pool_[roundrobin_index_],
                 adaptor_ctx_);
-            acceptor_.async_accept(p->socket(), 
+            acceptor_.async_accept(p->socket(),
                 [this, p, &is](boost::system::error_code ec)
                 {
                     if (!ec)
@@ -165,7 +164,7 @@ namespace crow
         std::vector<detail::dumb_timer_queue*> timer_queue_pool_;
         std::vector<std::function<std::string()>> get_cached_date_str_pool_;
         tcp::acceptor acceptor_;
-        boost::asio::signal_set signals_;
+        // boost::asio::signal_set signals_;
 
         Handler* handler_;
         uint16_t concurrency_{1};
