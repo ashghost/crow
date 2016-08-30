@@ -32,3 +32,4 @@ unittest
 build
 
 .directory
+.vscode

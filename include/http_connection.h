@@ -255,6 +255,7 @@ namespace crow
             add_keep_alive_ = false;
 
             req_ = std::move(parser_.to_request());
+            req_.remote_endpoint = boost::lexical_cast<std::string>(adaptor_.remote_endpoint());
             request& req = req_;
             if (parser_.check_version(1, 0))
             {
@@ -284,7 +285,7 @@ namespace crow
                 }
             }
 
-            CROW_LOG_INFO << "Request: " << boost::lexical_cast<std::string>(adaptor_.remote_endpoint()) << " " << this << " HTTP/" << parser_.http_major << "." << parser_.http_minor << ' '
+            CROW_LOG_INFO << "Request: " << req.remote_endpoint << " " << this << " HTTP/" << parser_.http_major << "." << parser_.http_minor << ' '
              << method_name(req.method) << " " << req.url;
 
 
@@ -300,7 +301,7 @@ namespace crow
 
                 if (!res.completed_)
                 {
-                    res.complete_request_handler_ = [this]{ 
+                    res.complete_request_handler_ = [this]{
                       this->socket().get_io_service().dispatch([this]() {
                         this->complete_request();
                       });
