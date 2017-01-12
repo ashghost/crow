@@ -1,9 +1,10 @@
 #pragma once
 #include <string>
 #include <unordered_map>
-#include "json.h"
-#include "http_request.h"
-#include "ci_map.h"
+
+#include "crow/json.h"
+#include "crow/http_request.h"
+#include "crow/ci_map.h"
 
 namespace crow
 {
@@ -14,9 +15,9 @@ namespace crow
         template <typename Adaptor, typename Handler, typename ... Middlewares>
         friend class crow::Connection;
 
+        int code{200};
         std::string body;
         json::wvalue json_value;
-        int code{200};
 
         // `headers' stores HTTP headers.
         ci_map headers;
@@ -44,7 +45,7 @@ namespace crow
         {
             json_mode();
         }
-        response(int code, std::string body) : body(std::move(body)), code(code) {}
+        response(int code, std::string body) : code(code), body(std::move(body)) {}
         response(const json::wvalue& json_value) : body(json::dump(json_value))
         {
             json_mode();

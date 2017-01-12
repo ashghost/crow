@@ -32,4 +32,5 @@ unittest
 build
 
 .directory
+crow_all.h
 .vscode

@@ -3,16 +3,9 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-#include "settings.h"
+#include "crow.h"
 #undef CROW_LOG_LEVEL
 #define CROW_LOG_LEVEL 0
-#include "routing.h"
-#include "utility.h"
-#include "crow.h"
-#include "json.h"
-#include "mustache.h"
-#include "middleware.h"
-#include "query_string.h"
 
 using namespace std;
 using namespace crow;
@@ -38,7 +31,7 @@ template <typename ...Args>
 void fail(Args...args) { error_print(args...);failed__ = true; }
 
 #define ASSERT_TRUE(x) if (!(x)) fail(__FILE__ ":", __LINE__, ": Assert fail: expected ", #x, " is true, at " __FILE__ ":",__LINE__)
-#define ASSERT_EQUAL(a, b) if ((a) != (b)) fail(__FILE__ ":", __LINE__, ": Assert fail: expected ", (a), " actual " , (b),  ", " #a " == " #b ", at " __FILE__ ":",__LINE__)
+#define ASSERT_EQUAL(a, b) if ((a) != (b)) fail(__FILE__ ":", __LINE__, ": Assert fail: expected ", (a), " actual ", (b),  ", " #a " == " #b ", at " __FILE__ ":",__LINE__)
 #define ASSERT_NOTEQUAL(a, b) if ((a) == (b)) fail(__FILE__ ":", __LINE__, ": Assert fail: not expected ", (a), ", " #a " != " #b ", at " __FILE__ ":",__LINE__)
 #define ASSERT_THROW(x) \
     try \
@@ -48,7 +41,7 @@ void fail(Args...args) { error_print(args...);failed__ = true; }
     } \
     catch(std::exception&) \
     { \
-    } 
+    }
 
 
 
@@ -57,13 +50,17 @@ void fail(Args...args) { error_print(args...);failed__ = true; }
 #define DISABLE_TEST(x) struct test##x{void test();}x##_; \
     void test##x::test()
 
+
+#define LOCALHOST_ADDRESS "127.0.0.1"
+
+
 TEST(Rule)
 {
     TaggedRule<> r("/http/");
     r.name("abc");
 
     // empty handler - fail to validate
-    try 
+    try
     {
         r.validate();
         fail("empty handler should fail to validate");
@@ -310,22 +307,22 @@ TEST(http_method)
 
     CROW_ROUTE(app, "/")
         .methods("POST"_method, "GET"_method)
-    ([](const request& req){ 
-        if (req.method == "GET"_method) 
-            return "2"; 
-        else 
-            return "1"; 
+    ([](const request& req){
+        if (req.method == "GET"_method)
+            return "2";
+        else
+            return "1";
     });
 
     CROW_ROUTE(app, "/get_only")
         .methods("GET"_method)
-    ([](const request& req){ 
-        return "get"; 
+    ([](const request& /*req*/){
+        return "get";
     });
     CROW_ROUTE(app, "/post_only")
         .methods("POST"_method)
-    ([](const request& req){ 
-        return "post"; 
+    ([](const request& /*req*/){
+        return "post";
     });
 
 
@@ -382,13 +379,13 @@ TEST(server_handling_error_request)
     static char buf[2048];
     SimpleApp app;
     CROW_ROUTE(app, "/")([]{return "A";});
-    Server<SimpleApp> server(&app, 45451);
+    Server<SimpleApp> server(&app, LOCALHOST_ADDRESS, 45451);
     auto _ = async(launch::async, [&]{server.run();});
     std::string sendmsg = "POX";
     asio::io_service is;
     {
         asio::ip::tcp::socket c(is);
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
 
 
         c.send(asio::buffer(sendmsg));
@@ -413,8 +410,8 @@ TEST(multi_server)
     CROW_ROUTE(app1, "/").methods("GET"_method, "POST"_method)([]{return "A";});
     CROW_ROUTE(app2, "/").methods("GET"_method, "POST"_method)([]{return "B";});
 
-    Server<SimpleApp> server1(&app1, 45451);
-    Server<SimpleApp> server2(&app2, 45452);
+    Server<SimpleApp> server1(&app1, LOCALHOST_ADDRESS, 45451);
+    Server<SimpleApp> server2(&app2, LOCALHOST_ADDRESS, 45452);
 
     auto _ = async(launch::async, [&]{server1.run();});
     auto _2 = async(launch::async, [&]{server2.run();});
@@ -423,7 +420,7 @@ TEST(multi_server)
     asio::io_service is;
     {
         asio::ip::tcp::socket c(is);
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
 
         c.send(asio::buffer(sendmsg));
 
@@ -433,7 +430,7 @@ TEST(multi_server)
 
     {
         asio::ip::tcp::socket c(is);
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45452));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45452));
 
         for(auto ch:sendmsg)
         {
@@ -452,7 +449,7 @@ TEST(multi_server)
 TEST(json_read)
 {
 	{
-        const char* json_error_tests[] = 
+        const char* json_error_tests[] =
         {
             "{} 3", "{{}", "{3}",
             "3.4.5", "+3", "3-2", "00", "03", "1e3e3", "1e+.3",
@@ -515,6 +512,10 @@ TEST(json_read)
     ASSERT_EQUAL(false, z["bools"][1].b());
     ASSERT_EQUAL(1.2, z["doubles"][0].d());
     ASSERT_EQUAL(-3.4, z["doubles"][1].d());
+
+    std::string s3 = R"({"uint64": 18446744073709551615})";
+    auto z1 = json::load(s3);
+    ASSERT_EQUAL(18446744073709551615ull, z1["uint64"].u());
 }
 
 TEST(json_read_real)
@@ -662,11 +663,11 @@ struct NullMiddleware
     struct context {};
 
     template <typename AllContext>
-    void before_handle(request& req, response& res, context& ctx, AllContext& all_ctx)
+    void before_handle(request&, response&, context&, AllContext&)
     {}
 
     template <typename AllContext>
-    void after_handle(request& req, response& res, context& ctx, AllContext& all_ctx)
+    void after_handle(request&, response&, context&, AllContext&)
     {}
 };
 
@@ -674,17 +675,18 @@ struct NullSimpleMiddleware
 {
     struct context {};
 
-    void before_handle(request& req, response& res, context& ctx)
+    void before_handle(request& /*req*/, response& /*res*/, context& /*ctx*/)
     {}
 
-    void after_handle(request& req, response& res, context& ctx)
+    void after_handle(request& /*req*/, response& /*res*/, context& /*ctx*/)
     {}
 };
+
 
 TEST(middleware_simple)
 {
     App<NullMiddleware, NullSimpleMiddleware> app;
-    decltype(app)::server_t server(&app, 45451);
+    decltype(app)::server_t server(&app, LOCALHOST_ADDRESS, 45451);
     CROW_ROUTE(app, "/")([&](const crow::request& req)
     {
         app.get_context<NullMiddleware>(req);
@@ -698,13 +700,13 @@ struct IntSettingMiddleware
     struct context { int val; };
 
     template <typename AllContext>
-    void before_handle(request& req, response& res, context& ctx, AllContext& all_ctx)
+    void before_handle(request&, response&, context& ctx, AllContext& )
     {
         ctx.val = 1;
     }
 
     template <typename AllContext>
-    void after_handle(request& req, response& res, context& ctx, AllContext& all_ctx)
+    void after_handle(request&, response&, context& ctx, AllContext& )
     {
         ctx.val = 2;
     }
@@ -714,17 +716,17 @@ std::vector<std::string> test_middleware_context_vector;
 
 struct FirstMW
 {
-    struct context 
-    { 
-        std::vector<string> v; 
+    struct context
+    {
+        std::vector<string> v;
     };
 
-    void before_handle(request& req, response& res, context& ctx)
+    void before_handle(request& /*req*/, response& /*res*/, context& ctx)
     {
         ctx.v.push_back("1 before");
     }
 
-    void after_handle(request& req, response& res, context& ctx)
+    void after_handle(request& /*req*/, response& /*res*/, context& ctx)
     {
         ctx.v.push_back("1 after");
         test_middleware_context_vector = ctx.v;
@@ -735,7 +737,7 @@ struct SecondMW
 {
     struct context {};
     template <typename AllContext>
-    void before_handle(request& req, response& res, context& ctx, AllContext& all_ctx)
+    void before_handle(request& req, response& res, context&, AllContext& all_ctx)
     {
         all_ctx.template get<FirstMW>().v.push_back("2 before");
         if (req.url == "/break")
@@ -743,7 +745,7 @@ struct SecondMW
     }
 
     template <typename AllContext>
-    void after_handle(request& req, response& res, context& ctx, AllContext& all_ctx)
+    void after_handle(request&, response&, context&, AllContext& all_ctx)
     {
         all_ctx.template get<FirstMW>().v.push_back("2 after");
     }
@@ -753,13 +755,13 @@ struct ThirdMW
 {
     struct context {};
     template <typename AllContext>
-    void before_handle(request& req, response& res, context& ctx, AllContext& all_ctx)
+    void before_handle(request&, response&, context&, AllContext& all_ctx)
     {
         all_ctx.template get<FirstMW>().v.push_back("3 before");
     }
 
     template <typename AllContext>
-    void after_handle(request& req, response& res, context& ctx, AllContext& all_ctx)
+    void after_handle(request&, response&, context&, AllContext& all_ctx)
     {
         all_ctx.template get<FirstMW>().v.push_back("3 after");
     }
@@ -799,13 +801,13 @@ TEST(middleware_context)
         return "";
     });
 
-    decltype(app)::server_t server(&app, 45451);
+    decltype(app)::server_t server(&app, LOCALHOST_ADDRESS, 45451);
     auto _ = async(launch::async, [&]{server.run();});
     std::string sendmsg = "GET /\r\n\r\n";
     asio::io_service is;
     {
         asio::ip::tcp::socket c(is);
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
 
 
         c.send(asio::buffer(sendmsg));
@@ -828,7 +830,7 @@ TEST(middleware_context)
     std::string sendmsg2 = "GET /break\r\n\r\n";
     {
         asio::ip::tcp::socket c(is);
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
 
         c.send(asio::buffer(sendmsg2));
 
@@ -865,13 +867,13 @@ TEST(middleware_cookieparser)
         return "";
     });
 
-    decltype(app)::server_t server(&app, 45451);
+    decltype(app)::server_t server(&app, LOCALHOST_ADDRESS, 45451);
     auto _ = async(launch::async, [&]{server.run();});
     std::string sendmsg = "GET /\r\nCookie: key1=value1; key2=\"val\\\"ue2\"\r\n\r\n";
     asio::io_service is;
     {
         asio::ip::tcp::socket c(is);
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
 
         c.send(asio::buffer(sendmsg));
 
@@ -895,7 +897,7 @@ TEST(bug_quick_repeated_request)
         return "hello";
     });
 
-    decltype(app)::server_t server(&app, 45451);
+    decltype(app)::server_t server(&app, LOCALHOST_ADDRESS, 45451);
     auto _ = async(launch::async, [&]{server.run();});
     std::string sendmsg = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
     asio::io_service is;
@@ -903,11 +905,11 @@ TEST(bug_quick_repeated_request)
         std::vector<std::future<void>> v;
         for(int i = 0; i < 5; i++)
         {
-            v.push_back(async(launch::async, 
+            v.push_back(async(launch::async,
                 [&]
                 {
                     asio::ip::tcp::socket c(is);
-                    c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+                    c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
 
                     for(int j = 0; j < 5; j ++)
                     {
@@ -939,7 +941,7 @@ TEST(simple_url_params)
 
     ///params?h=1&foo=bar&lol&count[]=1&count[]=4&pew=5.2
 
-    decltype(app)::server_t server(&app, 45451);
+    decltype(app)::server_t server(&app, LOCALHOST_ADDRESS, 45451);
     auto _ = async(launch::async, [&]{server.run();});
     asio::io_service is;
     std::string sendmsg;
@@ -948,7 +950,7 @@ TEST(simple_url_params)
     sendmsg = "GET /params\r\n\r\n";
     {
         asio::ip::tcp::socket c(is);
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
         c.send(asio::buffer(sendmsg));
         c.receive(asio::buffer(buf, 2048));
         c.close();
@@ -962,7 +964,7 @@ TEST(simple_url_params)
     sendmsg = "GET /params?foobar\r\n\r\n";
     {
         asio::ip::tcp::socket c(is);
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
         c.send(asio::buffer(sendmsg));
         c.receive(asio::buffer(buf, 2048));
         c.close();
@@ -975,7 +977,7 @@ TEST(simple_url_params)
     sendmsg = "GET /params?foo&bar&baz\r\n\r\n";
     {
         asio::ip::tcp::socket c(is);
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
         c.send(asio::buffer(sendmsg));
         c.receive(asio::buffer(buf, 2048));
         c.close();
@@ -989,10 +991,10 @@ TEST(simple_url_params)
     sendmsg = "GET /params?hello=world\r\n\r\n";
     {
         asio::ip::tcp::socket c(is);
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
         c.send(asio::buffer(sendmsg));
         c.receive(asio::buffer(buf, 2048));
-        c.close();        
+        c.close();
 
         ASSERT_EQUAL(string(last_url_params.get("hello")), "world");
     }
@@ -1000,7 +1002,7 @@ TEST(simple_url_params)
     sendmsg = "GET /params?hello=world&left=right&up=down\r\n\r\n";
     {
         asio::ip::tcp::socket c(is);
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
         c.send(asio::buffer(sendmsg));
         c.receive(asio::buffer(buf, 2048));
         c.close();
@@ -1013,10 +1015,10 @@ TEST(simple_url_params)
     sendmsg = "GET /params?int=100&double=123.45&boolean=1\r\n\r\n";
     {
         asio::ip::tcp::socket c(is);
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
         c.send(asio::buffer(sendmsg));
-        c.receive(asio::buffer(buf, 2048));        
-        c.close();    
+        c.receive(asio::buffer(buf, 2048));
+        c.close();
 
         ASSERT_EQUAL(boost::lexical_cast<int>(last_url_params.get("int")), 100);
         ASSERT_EQUAL(boost::lexical_cast<double>(last_url_params.get("double")), 123.45);
@@ -1027,11 +1029,11 @@ TEST(simple_url_params)
     {
         asio::ip::tcp::socket c(is);
 
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
         c.send(asio::buffer(sendmsg));
         c.receive(asio::buffer(buf, 2048));
-        c.close();        
-        
+        c.close();
+
         ASSERT_TRUE(last_url_params.get("tmnt") == nullptr);
         ASSERT_EQUAL(last_url_params.get_list("tmnt").size(), 1);
         ASSERT_EQUAL(string(last_url_params.get_list("tmnt")[0]), "leonardo");
@@ -1041,11 +1043,11 @@ TEST(simple_url_params)
     {
         asio::ip::tcp::socket c(is);
 
-        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string("127.0.0.1"), 45451));
+        c.connect(asio::ip::tcp::endpoint(asio::ip::address::from_string(LOCALHOST_ADDRESS), 45451));
         c.send(asio::buffer(sendmsg));
         c.receive(asio::buffer(buf, 2048));
-        c.close();        
-        
+        c.close();
+
         ASSERT_EQUAL(last_url_params.get_list("tmnt").size(), 3);
         ASSERT_EQUAL(string(last_url_params.get_list("tmnt")[0]), "leonardo");
         ASSERT_EQUAL(string(last_url_params.get_list("tmnt")[1]), "donatello");
@@ -1065,12 +1067,12 @@ TEST(route_dynamic)
     });
 
     app.route_dynamic("/set4")
-    ([&](const request& req){
+    ([&](const request&){
         x = 4;
         return "";
     });
     app.route_dynamic("/set5")
-    ([&](const request& req, response& res){
+    ([&](const request&, response& res){
         x = 5;
         res.end();
     });
@@ -1081,7 +1083,7 @@ TEST(route_dynamic)
         return "";
     });
 
-    try 
+    try
     {
         app.route_dynamic("/invalid_test/<double>/<path>")
         ([](){
@@ -1089,17 +1091,17 @@ TEST(route_dynamic)
         });
         fail();
     }
-    catch(std::exception&) 
+    catch(std::exception&)
     {
     }
 
     // app is in an invalid state when route_dynamic throws an exception.
-    try 
+    try
     {
         app.validate();
         fail();
     }
-    catch(std::exception&) 
+    catch(std::exception&)
     {
     }
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+
 #include <boost/asio.hpp>
 #ifdef CROW_ENABLE_SSL
 #include <boost/asio/ssl.hpp>
@@ -11,9 +13,9 @@
 
 #include <memory>
 
-#include "http_connection.h"
-#include "logging.h"
-#include "dumb_timer_queue.h"
+#include "crow/http_connection.h"
+#include "crow/logging.h"
+#include "crow/dumb_timer_queue.h"
 
 namespace crow
 {
@@ -24,15 +26,34 @@ namespace crow
     class Server
     {
     public:
-        Server(Handler* handler, uint16_t port, std::tuple<Middlewares...>* middlewares = nullptr, uint16_t concurrency = 1, typename Adaptor::context* adaptor_ctx = nullptr)
-            : acceptor_(io_service_, tcp::endpoint(asio::ip::address(), port)),
-            // signals_(io_service_, SIGINT, SIGTERM),
+    Server(Handler* handler, std::string bindaddr, uint16_t port, std::tuple<Middlewares...>* middlewares = nullptr, uint16_t concurrency = 1, typename Adaptor::context* adaptor_ctx = nullptr)
+            : acceptor_(io_service_, tcp::endpoint(boost::asio::ip::address::from_string(bindaddr), port)),
+            tick_timer_(io_service_),
             handler_(handler),
             concurrency_(concurrency),
             port_(port),
+            bindaddr_(bindaddr),
             middlewares_(middlewares),
             adaptor_ctx_(adaptor_ctx)
         {
+        }
+
+        void set_tick_function(std::chrono::milliseconds d, std::function<void()> f)
+        {
+            tick_interval_ = d;
+            tick_function_ = f;
+        }
+
+        void on_tick()
+        {
+            tick_function_();
+            tick_timer_.expires_from_now(boost::posix_time::milliseconds(tick_interval_.count()));
+            tick_timer_.async_wait([this](const boost::system::error_code& ec)
+                    {
+                        if (ec)
+                            return;
+                        on_tick();
+                    });
         }
 
         void run()
@@ -46,9 +67,10 @@ namespace crow
             timer_queue_pool_.resize(concurrency_);
 
             std::vector<std::future<void>> v;
+            std::atomic<int> init_count(0);
             for(uint16_t i = 0; i < concurrency_; i ++)
                 v.push_back(
-                        std::async(std::launch::async, [this, i]{
+                        std::async(std::launch::async, [this, i, &init_count]{
 
                             // thread local date string get function
                             auto last = std::chrono::steady_clock::now();
@@ -97,20 +119,31 @@ namespace crow
                             };
                             timer.async_wait(handler);
 
-                            io_service_pool_[i]->run();
+                            init_count ++;
+                            try 
+                            {
+                                io_service_pool_[i]->run();
+                            } catch(std::exception& e)
+                            {
+                                CROW_LOG_ERROR << "Worker Crash: An uncaught exception occurred: " << e.what();
+                            }
                         }));
+
+            if (tick_function_ && tick_interval_.count() > 0) 
+            {
+                tick_timer_.expires_from_now(std::chrono::milliseconds(tick_interval_.count()));
+                tick_timer_.async_wait([this](const boost::system::error_code& ec)
+                        {
+                            if (ec)
+                                return;
+                            on_tick();
+                        });
+            }
+
             CROW_LOG_INFO << server_name_ << " server is running, local port " << port_;
 
-            // signals_.async_wait(
-            //     [&](const boost::system::error_code& error, int signal_number){
-            //         stop();
-            //     });
-
-            for (int i = 0; i < concurrency_; i++)
-            {
-                while (timer_queue_pool_[i] == nullptr)
-                    std::this_thread::yield();
-            }
+            while(concurrency_ != init_count)
+                std::this_thread::yield();
 
             do_accept();
 
@@ -164,13 +197,17 @@ namespace crow
         std::vector<detail::dumb_timer_queue*> timer_queue_pool_;
         std::vector<std::function<std::string()>> get_cached_date_str_pool_;
         tcp::acceptor acceptor_;
-        // boost::asio::signal_set signals_;
+        boost::asio::steady_timer tick_timer_;
 
         Handler* handler_;
         uint16_t concurrency_{1};
         std::string server_name_ = "Crow/0.1";
         uint16_t port_;
+        std::string bindaddr_;
         unsigned int roundrobin_index_{};
+
+        std::chrono::milliseconds tick_interval_;
+        std::function<void()> tick_function_;
 
         std::tuple<Middlewares...>* middlewares_;
 
